@@ -120,7 +120,7 @@ plugin installation involved.
 repo:
 
 ```
-/plugin marketplace add YOUR-GITHUB-USERNAME/claude-review-gate
+/plugin marketplace add Majdi2224/claude-review-gate
 /plugin install review-gate@majdi-claude-plugins
 ```
 
