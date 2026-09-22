@@ -25,14 +25,38 @@ PR descriptions, no tests. In rough priority order:
    `.cmd`/`.bat` fakes directly; those gh-dependent tests skip themselves if
    `csc.exe` isn't found.
 
-3. **Optional AI-written summaries.** Right now the auto-generated PR body
-   is just `git diff --stat` + commit log — mechanical, on purpose, for
-   v0.1. A v2 could shell out to `claude -p "<prompt>" --output-format text`
-   with the diff piped in, to get a real natural-language summary as part
-   of the hook itself (not dependent on the current session's model
-   remembering to run the `review-gate` skill). Watch for: cost per PR,
-   latency added to every Stop event, and never let this call trigger
-   Claude Code's own hooks recursively.
+3. ~~**Optional AI-written summaries.**~~ Done — `aiSummary` (on by
+   default) shells out to `claude -p ... --safe-mode --restricted` with the
+   diff piped in. Verified for real (not just mocked) against a live GitHub
+   repo: the opened PR's body was genuinely Claude-written, not the
+   mechanical fallback.
+
+3a. ~~**Security hardening pass.**~~ Done, prompted by an explicit ask to
+   make this "as secure as possible before anyone else installs it":
+   - `blockSecretFiles` (on by default): before ever touching git, scans
+     for common credential filenames (`.env`, `id_rsa`, `*.pem`,
+     `credentials.json`, ...) and, separately, added diff lines for
+     well-known live API key/token formats (AWS, GitHub, GitLab, Anthropic,
+     OpenAI, Slack, Stripe, Google, PEM key blocks). Either check tripping
+     means nothing is committed or pushed at all — a forgotten-to-gitignore
+     secret can no longer get auto-shipped to GitHub. Verified live: a real
+     `.env` and a real hardcoded token were both held back with zero git
+     state changed.
+   - The `aiSummary` call now also passes `--disallowedTools
+     Edit,Write,MultiEdit,NotebookEdit --permission-prompts none`, on top of
+     `--restricted` — `--restricted` alone still leaves file tools available
+     (just confined to the working directory, which is the real repo), so a
+     prompt-injected instruction hidden in the diff being summarized could
+     otherwise get that "just describe this" call to actually edit files.
+     Verified live that the flags are valid and don't break the call.
+   - Every git/gh subprocess call now has a 20s timeout (previously only the
+     `claude -p` call did) — a hung network call could otherwise block the
+     Stop hook, and by extension the whole Claude Code session, indefinitely.
+   - Known, documented (not fixed — would need a bigger redesign):
+     `.claude/review-gate.json` lives inside the repo it's protecting, so a
+     merged PR could turn `blockSecretFiles` back off for later runs.
+     review-gate assumes a trusted repo/committer, not a malicious
+     collaborator.
 
 4. **Gate PR creation on tests passing.** Majdi already has a Stop hook
    that runs tests. Worth wiring review-gate to only open (not just commit)

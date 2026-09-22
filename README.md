@@ -61,7 +61,8 @@ defaults:
   "enabled": true,
   "baseBranches": ["main", "master"],
   "branchPrefix": "claude/",
-  "aiSummary": true
+  "aiSummary": true,
+  "blockSecretFiles": true
 }
 ```
 
@@ -75,12 +76,25 @@ defaults:
 - `aiSummary` — when a *new* PR is opened (not on later pushes to an
   existing one), review-gate shells out to `claude -p` (headless, with
   `--safe-mode` so it can't trigger hooks — including itself — recursively,
-  and `--restricted` so it has no tool access) to write the PR description
-  from the actual diff, instead of the mechanical `git diff --stat` + commit
-  log. This is on by default; set it to `false` to skip it and keep the
+  and `--restricted` plus explicit `--disallowedTools`/`--permission-prompts
+  none` so it has no ability to write files or run commands even if the diff
+  it's reading tries to prompt-inject it) to write the PR description from
+  the actual diff, instead of the mechanical `git diff --stat` + commit log.
+  This is on by default; set it to `false` to skip it and keep the
   mechanical body. If the call fails, times out, or `claude` isn't on
   `PATH`, review-gate silently falls back to the mechanical body — it never
   blocks a PR from opening over this.
+- `blockSecretFiles` — on by default. Before committing anything, review-gate
+  checks for filenames that commonly hold live credentials (`.env`,
+  `id_rsa`, `*.pem`, `credentials.json`, etc.) and, separately, scans added
+  diff lines for well-known API key/token formats (AWS, GitHub, GitLab,
+  Anthropic, OpenAI, Slack, Stripe, Google, PEM private key blocks). If
+  either check trips, **nothing is committed or pushed** — review-gate just
+  prints what it found and leaves your working tree untouched, so a
+  forgotten-to-gitignore secret never gets auto-shipped to GitHub. Set this
+  to `false` only if you're getting false positives you understand and
+  accept. It cannot see everything — it's a safety net for common mistakes,
+  not a real secret scanner, so still git-ignore your actual secret files.
 
 ## Installing it
 
@@ -148,6 +162,14 @@ to the "for this one project" method above in the meantime.
   tool; it's a review-visibility tool.
 - One PR per branch/session, kept updated by new commits — it will not spam
   a new PR every single turn.
+- `blockSecretFiles` (see `Configuration` above) is a pattern-based safety
+  net, not a real secret scanner — it catches common filenames and
+  well-known token formats, not every possible leak. It also can't protect
+  you from a *merged* PR that turns it off: `.claude/review-gate.json`
+  lives inside the repo, so anyone (or anything) with merge access can
+  disable it for future runs. review-gate assumes a trusted repo and a
+  single trusted committer; it is not a defense against a malicious
+  collaborator or a compromised dependency with write access.
 
 See `NEXT_STEPS.md` for ideas on where to take this next.
 
