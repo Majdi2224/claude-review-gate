@@ -33,7 +33,13 @@ function readStdinJson() {
   }
 }
 
-const CMD_TIMEOUT_MS = 20000;
+// Generous on purpose: a real git push or `gh` call can go through an OS
+// credential manager (Windows' keyring lookup in particular has been
+// observed taking well over 20s on a real machine) before it ever touches
+// the network. This needs to be long enough that a legitimately slow-but-
+// working environment isn't mistaken for a hang and reported as a failure
+// — an actual hang still eventually gets killed, just later.
+const CMD_TIMEOUT_MS = 60000;
 
 function run(cwd, cmd, args) {
   try {
@@ -210,6 +216,8 @@ function main() {
     branchPrefix: "claude/",
     aiSummary: true,
     blockSecretFiles: true,
+    reviewers: [],
+    labels: [],
   });
   if (config.enabled === false) return;
 
@@ -306,7 +314,22 @@ function main() {
   }
 
   if (run(cwd, "git", ["push", "-u", "origin", branch]) === null) {
-    note(`committed on "${branch}" but pushing to origin failed — push it yourself when you're ready.`);
+    // A remote branch by this name already existing is the signature of a
+    // diverged/rejected push (someone or something else pushed to it too).
+    // review-gate deliberately never merges/rebases/force-pushes on its own
+    // to reconcile that — silently rewriting history is a worse outcome
+    // than just telling the person what to do.
+    const diverged = run(cwd, "git", ["ls-remote", "--heads", "origin", branch]);
+    if (diverged) {
+      note(
+        `committed on "${branch}" but pushing to origin failed — the remote branch has commits this doesn't, ` +
+          `so it's diverged (probably pushed to from somewhere else). review-gate won't merge, rebase, or ` +
+          `force-push to fix that automatically: run "git pull --rebase origin ${branch}" yourself, resolve ` +
+          `anything that conflicts, then push.`
+      );
+    } else {
+      note(`committed on "${branch}" but pushing to origin failed — push it yourself when you're ready.`);
+    }
     return;
   }
 
@@ -364,11 +387,24 @@ function main() {
     "--body", body,
   ]);
 
-  if (prUrl) {
-    note(`opened a PR for review — ${prUrl}`);
-  } else {
+  if (!prUrl) {
     note(`pushed "${branch}" but "gh pr create" failed — open the PR manually on GitHub.`);
+    return;
   }
+
+  // Best-effort, separate from PR creation on purpose: a typo'd reviewer
+  // username or a label that doesn't exist in the repo would make `gh pr
+  // create` itself fail if passed inline, and that must never cost the
+  // person the PR they actually need. Reviewers/labels failing to attach
+  // just means they're missing, not that the PR is.
+  if ((config.reviewers || []).length > 0) {
+    run(cwd, "gh", ["pr", "edit", branch, "--add-reviewer", config.reviewers.join(",")]);
+  }
+  if ((config.labels || []).length > 0) {
+    run(cwd, "gh", ["pr", "edit", branch, "--add-label", config.labels.join(",")]);
+  }
+
+  note(`opened a PR for review — ${prUrl}`);
 }
 
 try {

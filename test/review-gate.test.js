@@ -189,6 +189,34 @@ test("no origin remote: commits locally, nothing pushed", () => {
   assert.equal(git(dir, ["log", "-1", "--pretty=%s"]), "Claude Code: update README.md");
 });
 
+test("push rejected because the branch diverged from origin: says so, doesn't try to fix it", () => {
+  const { dir, bareDir } = makeRepo();
+  git(dir, ["checkout", "-q", "-b", "feature-x"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nfirst\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-q", "-m", "first"]);
+  git(dir, ["push", "-q", "-u", "origin", "feature-x"]);
+
+  // Someone else pushes a second commit to the same branch on origin.
+  const otherClone = fs.mkdtempSync(path.join(os.tmpdir(), "review-gate-other-"));
+  git(otherClone, ["clone", "-q", bareDir, "."]);
+  git(otherClone, ["checkout", "-q", "feature-x"]);
+  fs.writeFileSync(path.join(otherClone, "OTHER.md"), "from someone else\n");
+  git(otherClone, ["add", "-A"]);
+  git(otherClone, ["commit", "-q", "-m", "external commit"]);
+  git(otherClone, ["push", "-q"]);
+
+  // Our local clone still only knows about "first" and now makes its own
+  // commit on top of it, which origin can no longer fast-forward to.
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nfirst\nedited\n");
+  const out = runReviewGate(dir, { hideRealGh: true });
+
+  assert.match(out, /diverged/);
+  assert.match(out, /won't merge, rebase, or force-push/);
+  assert.equal(git(dir, ["status", "--porcelain"]), ""); // committed locally either way
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "feature-x");
+});
+
 test("no gh installed: pushes, notes gh is missing", () => {
   const { dir, bareDir } = makeRepo();
   fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
@@ -322,4 +350,52 @@ test("no PR yet, Claude call fails: falls back to the mechanical body", { skip: 
   const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
   const body = createCall[createCall.indexOf("--body") + 1];
   assert.match(body, /generated mechanically/);
+});
+
+test("reviewers/labels from config are attached to a newly opened PR", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, {
+    aiSummary: false,
+    reviewers: ["alice", "bob"],
+    labels: ["ai-generated"],
+  });
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/5\n" },
+      "pr edit * --add-reviewer alice,bob": { code: 0 },
+      "pr edit * --add-label ai-generated": { code: 0 },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/5/);
+  const calls = scenario.invocations();
+  assert.ok(calls.some((a) => a[0] === "gh" && a.includes("--add-reviewer") && a.includes("alice,bob")));
+  assert.ok(calls.some((a) => a[0] === "gh" && a.includes("--add-label") && a.includes("ai-generated")));
+});
+
+test("an invalid reviewer/label doesn't cost you the PR", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { aiSummary: false, reviewers: ["no-such-user"] });
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/6\n" },
+      // "pr edit ... --add-reviewer no-such-user" is deliberately left
+      // unmocked, so the fake CLI exits 1 for it, same as a real invalid
+      // reviewer would.
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/6/);
 });
