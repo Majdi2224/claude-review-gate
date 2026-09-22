@@ -1,0 +1,11 @@
+{
+  "name": "review-gate",
+  "description": "Turns Claude Code's file edits into a reviewable GitHub pull request automatically, instead of leaving changes applied silently in your working copy.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Majdi Zeinedeen"
+  },
+  "homepage": "https://github.com/YOUR-GITHUB-USERNAME/claude-review-gate",
+  "license": "MIT",
+  "keywords": ["git", "github", "pull-request", "code-review", "safety", "hooks"]
+}

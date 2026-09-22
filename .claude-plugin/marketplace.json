@@ -1,0 +1,13 @@
+{
+  "name": "majdi-claude-plugins",
+  "owner": {
+    "name": "Majdi Zeinedeen"
+  },
+  "plugins": [
+    {
+      "name": "review-gate",
+      "source": "./",
+      "description": "Turns Claude Code's file edits into a reviewable GitHub pull request automatically."
+    }
+  ]
+}
