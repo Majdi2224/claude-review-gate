@@ -87,6 +87,74 @@ test("no uncommitted changes: does nothing, no output", () => {
   assert.equal(out, "");
 });
 
+test("a forgotten .env file: held back entirely, nothing committed or pushed", () => {
+  const { dir, bareDir } = makeRepo();
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  fs.writeFileSync(path.join(dir, ".env"), "API_KEY=super-secret\n");
+
+  const out = runReviewGate(dir, { hideRealGh: true });
+
+  assert.match(out, /held back/);
+  assert.match(out, /\.env/);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+  assert.notEqual(git(dir, ["status", "--porcelain"]), "");
+  assert.equal(git(bareDir, ["branch", "--list"]), "");
+});
+
+test(".env.example is not treated as a secret", () => {
+  const { dir } = makeRepo();
+  fs.writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n");
+
+  const out = runReviewGate(dir, { hideRealGh: true });
+
+  assert.doesNotMatch(out, /held back/);
+  assert.match(git(dir, ["log", "-1", "--pretty=%s"]), /update \.env\.example/);
+});
+
+test("a hardcoded API key inline in a normal file: held back, unstaged", () => {
+  const { dir, bareDir } = makeRepo();
+  fs.writeFileSync(
+    path.join(dir, "config.js"),
+    'module.exports = { token: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" };\n'
+  );
+
+  const out = runReviewGate(dir, { hideRealGh: true });
+
+  assert.match(out, /held back/);
+  assert.match(out, /API key\/token\/private key/);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+  assert.notEqual(git(dir, ["status", "--porcelain"]), "");
+  assert.equal(git(dir, ["diff", "--cached"]), ""); // unstaged, not left half-committed
+  assert.equal(git(bareDir, ["branch", "--list"]), "");
+});
+
+test("removing an old key is not blocked", () => {
+  const { dir } = makeRepo();
+  fs.writeFileSync(
+    path.join(dir, "config.js"),
+    'module.exports = { token: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" };\n'
+  );
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-q", "-m", "add token"]);
+  fs.writeFileSync(path.join(dir, "config.js"), "module.exports = {};\n");
+
+  const out = runReviewGate(dir, { hideRealGh: true });
+
+  assert.doesNotMatch(out, /held back/);
+  assert.equal(git(dir, ["status", "--porcelain"]), "");
+});
+
+test("blockSecretFiles: false opts back into committing an .env file", () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { blockSecretFiles: false });
+  fs.writeFileSync(path.join(dir, ".env"), "API_KEY=super-secret\n");
+
+  const out = runReviewGate(dir, { hideRealGh: true });
+
+  assert.doesNotMatch(out, /held back/);
+  assert.equal(git(dir, ["status", "--porcelain"]), "");
+});
+
 test("changes on main: auto-creates a branch and commits, off main", () => {
   const { dir, bareDir } = makeRepo();
   fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
@@ -211,7 +279,7 @@ test("no PR yet, AI summary on (default): PR body is Claude's summary", { skip: 
       "pr create **": { stdout: "https://github.com/example/repo/pull/3\n" },
     },
     claude: {
-      "-p * --output-format text --model haiku --safe-mode --restricted": {
+      "-p * --output-format text --model haiku --safe-mode --restricted --disallowedTools Edit,Write,MultiEdit,NotebookEdit --permission-prompts none": {
         stdout: "Updates the README with an extra line.\n",
       },
     },
@@ -224,6 +292,13 @@ test("no PR yet, AI summary on (default): PR body is Claude's summary", { skip: 
   const body = createCall[createCall.indexOf("--body") + 1];
   assert.match(body, /Updates the README with an extra line\./);
   assert.doesNotMatch(body, /generated mechanically/);
+
+  // The summary call must not be able to touch files in the real repo,
+  // even if the (untrusted) diff it's fed tries to prompt-inject it.
+  const claudeCall = scenario.invocations().find((a) => a[0] === "claude");
+  assert.ok(claudeCall.includes("--disallowedTools"));
+  assert.equal(claudeCall[claudeCall.indexOf("--disallowedTools") + 1], "Edit,Write,MultiEdit,NotebookEdit");
+  assert.equal(claudeCall[claudeCall.indexOf("--permission-prompts") + 1], "none");
 });
 
 test("no PR yet, Claude call fails: falls back to the mechanical body", { skip: !fakeBinDir }, () => {
@@ -237,7 +312,7 @@ test("no PR yet, Claude call fails: falls back to the mechanical body", { skip: 
       "pr create **": { stdout: "https://github.com/example/repo/pull/4\n" },
     },
     claude: {
-      "-p * --output-format text --model haiku --safe-mode --restricted": { code: 1 },
+      "-p * --output-format text --model haiku --safe-mode --restricted --disallowedTools Edit,Write,MultiEdit,NotebookEdit --permission-prompts none": { code: 1 },
     },
   });
 
