@@ -399,3 +399,67 @@ test("an invalid reviewer/label doesn't cost you the PR", { skip: !fakeBinDir },
 
   assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/6/);
 });
+
+test("failing tests (from a separate test-runner hook's result file): PR opens as a draft", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { aiSummary: false, testResultsFile: ".claude/test-results.json" });
+  fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude", "test-results.json"), JSON.stringify({ passed: false }));
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/7\n" },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  assert.match(out, /opened as a draft — tests were failing/);
+  const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
+  assert.ok(createCall.includes("--draft"));
+  const body = createCall[createCall.indexOf("--body") + 1];
+  assert.match(body, /Tests were failing/);
+});
+
+test("passing tests (from the result file): normal PR, not a draft", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { aiSummary: false, testResultsFile: ".claude/test-results.json" });
+  fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude", "test-results.json"), JSON.stringify({ passed: true }));
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/8\n" },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/8/);
+  const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
+  assert.ok(!createCall.includes("--draft"));
+});
+
+test("testResultsFile configured but missing: never blocks a normal PR", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { aiSummary: false, testResultsFile: ".claude/test-results.json" });
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/9\n" },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/9/);
+});

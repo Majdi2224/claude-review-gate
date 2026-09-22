@@ -64,7 +64,10 @@ defaults:
   "baseBranches": ["main", "master"],
   "branchPrefix": "claude/",
   "aiSummary": true,
-  "blockSecretFiles": true
+  "blockSecretFiles": true,
+  "reviewers": [],
+  "labels": [],
+  "testResultsFile": null
 }
 ```
 
@@ -97,6 +100,22 @@ defaults:
   to `false` only if you're getting false positives you understand and
   accept. It cannot see everything — it's a safety net for common mistakes,
   not a real secret scanner, so still git-ignore your actual secret files.
+- `reviewers` / `labels` — applied to a *newly opened* PR (not on later
+  pushes) via `gh pr edit`, after the PR already exists. A typo'd reviewer
+  username or a label your repo doesn't have will fail to attach silently
+  rather than costing you the PR itself.
+- `testResultsFile` — off by default (`null`). If you have a separate Stop
+  hook that runs your test suite, point this at a path (relative to the
+  project root) that hook writes `{"passed": true}` or `{"passed": false}`
+  to after each run. **Register that hook before review-gate** in your
+  `Stop` hooks array in `settings.json` — Claude Code runs same-event hooks
+  in list order, so this guarantees the result file is fresh for the exact
+  turn review-gate is reacting to. When the file says `passed: false`,
+  review-gate still commits and pushes exactly as always, but opens the PR
+  as a **draft** with a note that tests were failing, instead of
+  ready-for-review. A missing, unreadable, or unconfigured file is treated
+  as "unknown" and never blocks a normal PR — this only ever adds the draft
+  state, it never skips opening a PR.
 
 ## Installing it
 

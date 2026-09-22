@@ -192,6 +192,22 @@ function saveJson(file, data) {
   }
 }
 
+// Optional integration with a separate tests-running Stop hook, meant to
+// be registered to run BEFORE review-gate in the same Stop hooks array so
+// its result file is guaranteed fresh for this exact turn (Claude Code
+// runs same-event hooks in the order they're listed). If configured and
+// it reports `{"passed": false}`, review-gate still commits and pushes
+// exactly as it always does — that guarantee never changes — but opens
+// the PR as a draft instead of ready-for-review. Not configured, missing,
+// unreadable, or missing a `passed` field are all treated as "unknown"
+// and never block a normal PR: this is a convenience layered on top, not
+// worth risking a false negative over.
+function testsFailed(cwd, config) {
+  if (!config.testResultsFile) return false;
+  const result = loadJson(path.join(cwd, config.testResultsFile), null);
+  return !!result && result.passed === false;
+}
+
 function timestamp() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -218,6 +234,7 @@ function main() {
     blockSecretFiles: true,
     reviewers: [],
     labels: [],
+    testResultsFile: null,
   });
   if (config.enabled === false) return;
 
@@ -365,7 +382,7 @@ function main() {
           run(cwd, "git", ["diff", `${base}...${branch}`]) || ""
         );
 
-  const body = aiSummary
+  let body = aiSummary
     ? `🤖 Opened automatically by **review-gate**, with this summary written by ` +
       `Claude from the diff — read the actual diff before merging, this is a ` +
       `starting point, not a substitute.\n\n${aiSummary}\n\n` +
@@ -379,13 +396,21 @@ function main() {
       `### Commits\n\`\`\`\n${commitLog}\n\`\`\`\n\n` +
       `### Files changed\n\`\`\`\n${diffStat}\n\`\`\`\n`;
 
-  const prUrl = run(cwd, "gh", [
+  const testsAreFailing = testsFailed(cwd, config);
+  if (testsAreFailing) {
+    body = `🔴 **Tests were failing as of the last run before this PR was opened.** Opened as a draft — review with that in mind.\n\n${body}`;
+  }
+
+  const createArgs = [
     "pr", "create",
     "--base", base,
     "--head", branch,
     "--title", latestSubject,
     "--body", body,
-  ]);
+  ];
+  if (testsAreFailing) createArgs.push("--draft");
+
+  const prUrl = run(cwd, "gh", createArgs);
 
   if (!prUrl) {
     note(`pushed "${branch}" but "gh pr create" failed — open the PR manually on GitHub.`);
@@ -404,7 +429,11 @@ function main() {
     run(cwd, "gh", ["pr", "edit", branch, "--add-label", config.labels.join(",")]);
   }
 
-  note(`opened a PR for review — ${prUrl}`);
+  note(
+    testsAreFailing
+      ? `opened as a draft — tests were failing as of the last run — ${prUrl}`
+      : `opened a PR for review — ${prUrl}`
+  );
 }
 
 try {
