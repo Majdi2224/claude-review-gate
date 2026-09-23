@@ -151,16 +151,24 @@ the plugin/marketplace system at all:
 That uses Claude Code's plain project-level hooks/skills/commands — no
 plugin installation involved.
 
-**As an installable plugin**, once this folder is pushed to a public GitHub
-repo:
+**As an installable plugin**:
 
 ```
 /plugin marketplace add Majdi2224/claude-review-gate
-/plugin install review-gate@majdi-claude-plugins
+/plugin install review-gate@majdi-claude-plugins --scope project
 ```
 
-(the marketplace name comes from `.claude-plugin/marketplace.json`). Anyone
-who runs those two commands in Claude Code gets review-gate in that project.
+(the marketplace name comes from `.claude-plugin/marketplace.json`).
+
+**The `--scope project` matters.** Plugin installs default to `user` scope,
+which enables review-gate for *every* git repo you touch with Claude Code
+from then on, not just the project you're currently in — including
+completely unrelated projects, silently. Unless you actually want that
+everywhere, install it per-project with `--scope project` (or `--scope
+local` for a scope that isn't shared if you commit `.claude/settings.json`).
+Verified for real: `claude plugin marketplace add` and `claude plugin
+install` both work exactly as shown against the published repo, and `claude
+plugin validate --strict` passes on the manifests.
 
 Claude Code's plugin file layout has moved before and may move again —
 if a fresh Claude Code version doesn't pick this structure up, check
