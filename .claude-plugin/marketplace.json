@@ -1,5 +1,6 @@
 {
   "name": "majdi-claude-plugins",
+  "description": "Claude Code plugins published by Majdi Zeinedeen.",
   "owner": {
     "name": "Majdi Zeinedeen"
   },
