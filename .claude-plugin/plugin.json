@@ -1,7 +1,7 @@
 {
   "name": "review-gate",
   "description": "Turns Claude Code's file edits into a reviewable GitHub pull request automatically, instead of leaving changes applied silently in your working copy.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Majdi Zeinedeen"
   },

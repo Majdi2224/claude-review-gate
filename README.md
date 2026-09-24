@@ -26,18 +26,27 @@ human has to look at before it's merged.
    - pushes the branch to `origin`,
    - opens a GitHub pull request via the `gh` CLI (or updates the existing
      one, since pushing new commits does that automatically).
-4. A skill (`skills/review-gate/SKILL.md`) nudges Claude to replace the
-   mechanical PR description with a short, honest, plain-language summary
-   once it's actually done with a task.
+4. A skill (`skills/review-gate/SKILL.md`) nudges Claude to (a) notice when
+   new work is a genuinely separate feature from whatever PR is already
+   open and ask before mixing them together, and (b) replace the mechanical
+   PR description with a short, honest, plain-language summary — ending its
+   reply with a clearly labeled `Summary: ... / PR link: ...` block — once
+   it's actually done with a task.
 5. A `/ship` command lets you (or Claude) force step 3 to happen mid-session
    instead of waiting for the turn to end. `/pause` and `/resume` turn the
    whole thing off/back on for a project without hand-editing
-   `.claude/review-gate.json`.
+   `.claude/review-gate.json`. `/new-pr` starts a fresh branch/PR for a new
+   feature on purpose, instead of continuing to add to the one that's
+   already open.
 
 The commit/push/PR-open step is a deterministic script, not something the
 model decides to do — that's on purpose. Relying on the model to "remember"
 every time is exactly the kind of gap this tool exists to close. The skill
-is a quality layer on top of that guarantee, not a substitute for it.
+is a quality layer on top of that guarantee, not a substitute for it — it's
+genuinely useful (it's the only part that can reason about "is this the
+same feature or a new one," which no script can judge), but it's not
+code-enforced: it depends on Claude recognizing the moment to use it, same
+as any other skill.
 
 ## Requirements
 
@@ -129,10 +138,12 @@ defaults:
 **For this one project**, the fastest way to try it without dealing with
 the plugin/marketplace system at all:
 
-1. Copy `scripts/review-gate.js`, `skills/review-gate/`, and everything in
-   `commands/` into that project's `.claude/` folder (so you end up with
-   `.claude/scripts/review-gate.js`, `.claude/skills/review-gate/`, and
-   `.claude/commands/ship.md`, `pause.md`, `resume.md`).
+1. Copy everything in `scripts/` (not just `review-gate.js` — `lib.js` and
+   `start-new-pr.js` are required alongside it), `skills/review-gate/`, and
+   everything in `commands/` into that project's `.claude/` folder (so you
+   end up with `.claude/scripts/review-gate.js`, `lib.js`,
+   `start-new-pr.js`, `.claude/skills/review-gate/`, and
+   `.claude/commands/ship.md`, `pause.md`, `resume.md`, `new-pr.md`).
 2. Add the `hooks` key below to that project's `.claude/settings.json` —
    note this uses `${CLAUDE_PROJECT_DIR}`, not `${CLAUDE_PLUGIN_ROOT}`
    (that variable only resolves for real plugin installs, not a plain copied
