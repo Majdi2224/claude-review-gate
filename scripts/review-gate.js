@@ -23,6 +23,7 @@
 const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { run, loadJson, saveJson, timestamp, loadConfig, stateFilePath } = require("./lib");
 
 function readStdinJson() {
   try {
@@ -30,27 +31,6 @@ function readStdinJson() {
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
-  }
-}
-
-// Generous on purpose: a real git push or `gh` call can go through an OS
-// credential manager (Windows' keyring lookup in particular has been
-// observed taking well over 20s on a real machine) before it ever touches
-// the network. This needs to be long enough that a legitimately slow-but-
-// working environment isn't mistaken for a hang and reported as a failure
-// — an actual hang still eventually gets killed, just later.
-const CMD_TIMEOUT_MS = 60000;
-
-function run(cwd, cmd, args) {
-  try {
-    return execFileSync(cmd, args, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: CMD_TIMEOUT_MS,
-    }).trim();
-  } catch {
-    return null;
   }
 }
 
@@ -175,23 +155,6 @@ function generateAiSummary(cwd, commitLog, diff) {
   }
 }
 
-function loadJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJson(file, data) {
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-  } catch {
-    /* best-effort only */
-  }
-}
-
 // Optional integration with a separate tests-running Stop hook, meant to
 // be registered to run BEFORE review-gate in the same Stop hooks array so
 // its result file is guaranteed fresh for this exact turn (Claude Code
@@ -208,15 +171,6 @@ function testsFailed(cwd, config) {
   return !!result && result.passed === false;
 }
 
-function timestamp() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-` +
-    `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
-  );
-}
-
 function main() {
   const input = readStdinJson();
   const cwd = input.cwd || process.cwd();
@@ -225,17 +179,7 @@ function main() {
     return; // not a git repo at all — nothing to do
   }
 
-  const configPath = path.join(cwd, ".claude", "review-gate.json");
-  const config = loadJson(configPath, {
-    enabled: true,
-    baseBranches: ["main", "master"],
-    branchPrefix: "claude/",
-    aiSummary: true,
-    blockSecretFiles: true,
-    reviewers: [],
-    labels: [],
-    testResultsFile: null,
-  });
+  const config = loadConfig(cwd);
   if (config.enabled === false) return;
 
   const status = run(cwd, "git", ["status", "--porcelain"]);
@@ -270,11 +214,7 @@ function main() {
     }
   }
 
-  // State (which branch belongs to which Claude Code session) lives inside
-  // .git/ so it's local-only and never accidentally committed.
-  let gitDir = run(cwd, "git", ["rev-parse", "--git-dir"]) || ".git";
-  if (!path.isAbsolute(gitDir)) gitDir = path.join(cwd, gitDir);
-  const stateFile = path.join(gitDir, "review-gate", "sessions.json");
+  const stateFile = stateFilePath(cwd);
   const state = loadJson(stateFile, {});
 
   const sessionId = input.session_id || "unknown-session";
