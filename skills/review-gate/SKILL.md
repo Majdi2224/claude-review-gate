@@ -26,9 +26,15 @@ part is yours. Whenever you finish a task that touched code in this repo:
    risky parts is enough. Don't restate the diff line by line; the diff is
    already attached to the PR.
 4. Never claim something was tested unless you actually ran it.
-5. Tell the person in the chat that the PR is ready for review and give them
-   the link, even though review-gate already printed a note about it — they
-   may not have seen it.
+5. End your reply to the person with exactly this shape, filled in — as its
+   own clearly labeled block, not folded into other prose, and not skipped
+   even though review-gate already printed its own note (they may not have
+   seen it, and it doesn't include the "why"):
+
+   ```
+   Summary: <one or two plain-language sentences — what changed and why>
+   PR link: <the PR URL>
+   ```
 
 Do not merge the PR yourself, and don't push directly to the base branch
 (main/master) to "save a step" — the entire point of this tool is that a
