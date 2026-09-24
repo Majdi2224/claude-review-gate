@@ -19,7 +19,7 @@ function pathWithoutRealTool(basePath, toolName) {
 
 function runReviewGate(
   cwd,
-  { sessionId = "test-session", fakeBinDir, hideRealGh, extraEnv = {} } = {}
+  { sessionId = "test-session", fakeBinDir, hideRealGh, extraEnv = {}, stopHookActive = false } = {}
 ) {
   const env = { ...process.env, ...extraEnv };
   env.PATH = hideRealGh ? pathWithoutRealTool(env.PATH, "gh") : env.PATH;
@@ -27,10 +27,19 @@ function runReviewGate(
 
   return execFileSync("node", [SCRIPT], {
     cwd,
-    input: JSON.stringify({ cwd, session_id: sessionId }),
+    input: JSON.stringify({ cwd, session_id: sessionId, stop_hook_active: stopHookActive }),
     encoding: "utf8",
     env,
   });
+}
+
+// Success paths force a {"decision":"block","reason":"..."} continuation by
+// default so the PR link can never be silently missing from the chat (see
+// announcePr() in review-gate.js). Parses that out for assertions.
+function parseBlock(out) {
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.decision, "block");
+  return parsed.reason;
 }
 
 let fakeBinDir;
@@ -231,7 +240,9 @@ test("PR already exists: updates it, does not create a new one, never asks Claud
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /updated the existing PR — https:\/\/github\.com\/example\/repo\/pull\/1/);
+  const reason1 = parseBlock(out);
+  assert.match(reason1, /updated the existing PR/);
+  assert.match(reason1, /PR link: https:\/\/github\.com\/example\/repo\/pull\/1/);
   const calls = scenario.invocations();
   assert.ok(!calls.some((a) => a[0] === "gh" && a[2] === "create"), "should not have called `gh pr create`");
   assert.ok(!calls.some((a) => a[0] === "claude"), "should not have asked Claude for a summary");
@@ -252,7 +263,9 @@ test("no PR yet, AI summary off: opens one with the mechanical body", { skip: !f
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/2/);
+  const reason2 = parseBlock(out);
+  assert.match(reason2, /opened a PR for review/);
+  assert.match(reason2, /PR link: https:\/\/github\.com\/example\/repo\/pull\/2/);
   const branch = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const calls = scenario.invocations();
   assert.ok(!calls.some((a) => a[0] === "claude"), "aiSummary: false should skip Claude entirely");
@@ -283,7 +296,9 @@ test("no PR yet, AI summary on (default): PR body is Claude's summary", { skip: 
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/3/);
+  const reason3 = parseBlock(out);
+  assert.match(reason3, /opened a PR for review/);
+  assert.match(reason3, /PR link: https:\/\/github\.com\/example\/repo\/pull\/3/);
   const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
   const body = createCall[createCall.indexOf("--body") + 1];
   assert.match(body, /Updates the README with an extra line\./);
@@ -314,7 +329,7 @@ test("no PR yet, Claude call fails: falls back to the mechanical body", { skip: 
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review/);
+  assert.match(parseBlock(out), /opened a PR for review/);
   const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
   const body = createCall[createCall.indexOf("--body") + 1];
   assert.match(body, /generated mechanically/);
@@ -341,7 +356,9 @@ test("reviewers/labels from config are attached to a newly opened PR", { skip: !
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/5/);
+  const reason5 = parseBlock(out);
+  assert.match(reason5, /opened a PR for review/);
+  assert.match(reason5, /PR link: https:\/\/github\.com\/example\/repo\/pull\/5/);
   const calls = scenario.invocations();
   assert.ok(calls.some((a) => a[0] === "gh" && a.includes("--add-reviewer") && a.includes("alice,bob")));
   assert.ok(calls.some((a) => a[0] === "gh" && a.includes("--add-label") && a.includes("ai-generated")));
@@ -365,7 +382,9 @@ test("an invalid reviewer/label doesn't cost you the PR", { skip: !fakeBinDir },
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/6/);
+  const reason6 = parseBlock(out);
+  assert.match(reason6, /opened a PR for review/);
+  assert.match(reason6, /PR link: https:\/\/github\.com\/example\/repo\/pull\/6/);
 });
 
 test("failing tests (from a separate test-runner hook's result file): PR opens as a draft", { skip: !fakeBinDir }, () => {
@@ -385,7 +404,9 @@ test("failing tests (from a separate test-runner hook's result file): PR opens a
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened as a draft — tests were failing/);
+  const reason7 = parseBlock(out);
+  assert.match(reason7, /opened as a draft \(tests were failing/);
+  assert.match(reason7, /PR link: https:\/\/github\.com\/example\/repo\/pull\/7/);
   const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
   assert.ok(createCall.includes("--draft"));
   const body = createCall[createCall.indexOf("--body") + 1];
@@ -409,7 +430,9 @@ test("passing tests (from the result file): normal PR, not a draft", { skip: !fa
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/8/);
+  const reason8 = parseBlock(out);
+  assert.match(reason8, /opened a PR for review/);
+  assert.match(reason8, /PR link: https:\/\/github\.com\/example\/repo\/pull\/8/);
   const createCall = scenario.invocations().find((a) => a[0] === "gh" && a[2] === "create");
   assert.ok(!createCall.includes("--draft"));
 });
@@ -429,5 +452,65 @@ test("testResultsFile configured but missing: never blocks a normal PR", { skip:
 
   const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
 
-  assert.match(out, /opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/9/);
+  const reason9 = parseBlock(out);
+  assert.match(reason9, /opened a PR for review/);
+  assert.match(reason9, /PR link: https:\/\/github\.com\/example\/repo\/pull\/9/);
+});
+
+test("announceInChat: false opts back into the plain note instead of blocking", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { aiSummary: false, announceInChat: false });
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/10\n" },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  assert.doesNotMatch(out, /"decision"/);
+  assert.match(out, /\[review-gate\] opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/10/);
+});
+
+test("stop_hook_active: true never blocks twice in the same cycle", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  writeConfig(dir, { aiSummary: false });
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/11\n" },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env, stopHookActive: true });
+
+  assert.doesNotMatch(out, /"decision"/);
+  assert.match(out, /\[review-gate\] opened a PR for review — https:\/\/github\.com\/example\/repo\/pull\/11/);
+});
+
+test("updating an existing PR also forces the announcement by default", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json url --jq .url": {
+        stdout: "https://github.com/example/repo/pull/12\n",
+      },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  const reason = parseBlock(out);
+  assert.match(reason, /updated the existing PR/);
+  assert.match(reason, /PR link: https:\/\/github\.com\/example\/repo\/pull\/12/);
 });

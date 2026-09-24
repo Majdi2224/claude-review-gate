@@ -8,9 +8,11 @@ description: Use in a repo with the review-gate hook installed. Two jobs — (1)
 This project has the review-gate hook installed. Every time you finish
 making edits and leave uncommitted changes, a script (`scripts/review-gate.js`,
 run automatically as a `Stop` hook) commits them, pushes a branch, and opens
-or updates a GitHub pull request. **That part is guaranteed to happen
-whether or not you follow this skill** — it's a plain script, not something
-you need to remember to trigger.
+or updates a GitHub pull request — and, once there's a real link, forces you
+to say so clearly in the chat. **All of that is guaranteed to happen whether
+or not you follow this skill** — it's a plain script, not something you need
+to remember to trigger, and it doesn't need this skill's Part B below to
+make sure the person sees the link.
 
 What the script can't do on its own is judge whether new work belongs on
 the PR that's already open, or deserves its own — and it can't explain
@@ -88,9 +90,9 @@ you just did — those belong on the PR that's already open):
    already attached to the PR.
 4. Never claim something was tested unless you actually ran it.
 5. End your reply to the person with exactly this shape, filled in — as its
-   own clearly labeled block, not folded into other prose, and not skipped
-   even though review-gate already printed its own note (they may not have
-   seen it, and it doesn't include the "why"):
+   own clearly labeled block, not folded into other prose. review-gate's
+   hook will force this at minimum on its own even if you skip this whole
+   skill (it doesn't include the "why" though — that part really is yours):
 
    ```
    Summary: <one or two plain-language sentences — what changed and why>

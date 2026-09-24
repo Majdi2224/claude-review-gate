@@ -14,10 +14,17 @@
  * Design rules this script follows on purpose:
  *   - NEVER throw / exit non-zero. A bug in here must never block or
  *     interrupt the person's Claude Code session.
- *   - NEVER force Claude to keep responding (no {"decision":"block"}
- *     output) — this hook only does git/gh work, it doesn't talk back.
  *   - Degrade quietly at each missing prerequisite (no git repo, no
  *     remote, no gh, not authenticated) instead of failing loudly.
+ *   - The ONE exception to "never talk back": once a PR actually has a
+ *     link worth showing (opened or updated), this forces one — and only
+ *     one — extra response via {"decision":"block","reason":...} so the
+ *     link is never silently missing from the chat. Real testing showed
+ *     the review-gate skill alone doesn't reliably surface it on a plain,
+ *     single-task turn. Guarded by the `stop_hook_active` input field
+ *     (sat by Claude Code once this hook has already forced a
+ *     continuation) so it can never block twice in the same cycle —
+ *     `announceInChat: false` turns it off entirely if it's unwanted.
  */
 
 const { execFileSync } = require("child_process");
@@ -36,6 +43,31 @@ function readStdinJson() {
 
 function note(msg) {
   console.log(`[review-gate] ${msg}`);
+}
+
+// Prints a plain note (as before) unless a PR link is genuinely available
+// and forcing it makes sense: config allows it, and this hook hasn't
+// already forced a continuation this cycle (stop_hook_active guards
+// against ever blocking twice — Claude Code sets that field once a Stop
+// hook has already forced one continuation).
+function announcePr(config, alreadyAnnounced, prUrl, verb) {
+  if (config.announceInChat === false || alreadyAnnounced) {
+    note(`${verb} — ${prUrl}`);
+    return;
+  }
+  console.log(
+    JSON.stringify({
+      decision: "block",
+      reason:
+        `review-gate ${verb} for the changes just made.\n\n` +
+        `PR link: ${prUrl}\n\n` +
+        "Make sure that link is clearly visible in your reply — a short " +
+        '"PR link: ..." line is enough if you already described the change. ' +
+        "If you're about to start a different, unrelated feature next, check " +
+        "the review-gate skill's guidance on whether it belongs on this PR or " +
+        "deserves a fresh one first.",
+    })
+  );
 }
 
 const MAX_DIFF_CHARS = 12000;
@@ -174,6 +206,7 @@ function testsFailed(cwd, config) {
 function main() {
   const input = readStdinJson();
   const cwd = input.cwd || process.cwd();
+  const alreadyAnnounced = input.stop_hook_active === true;
 
   if (run(cwd, "git", ["rev-parse", "--is-inside-work-tree"]) !== "true") {
     return; // not a git repo at all — nothing to do
@@ -304,7 +337,7 @@ function main() {
     "pr", "view", branch, "--json", "url", "--jq", ".url",
   ]);
   if (existingPrUrl) {
-    note(`updated the existing PR — ${existingPrUrl}`);
+    announcePr(config, alreadyAnnounced, existingPrUrl, "updated the existing PR");
     return;
   }
 
@@ -369,10 +402,11 @@ function main() {
     run(cwd, "gh", ["pr", "edit", branch, "--add-label", config.labels.join(",")]);
   }
 
-  note(
-    testsAreFailing
-      ? `opened as a draft — tests were failing as of the last run — ${prUrl}`
-      : `opened a PR for review — ${prUrl}`
+  announcePr(
+    config,
+    alreadyAnnounced,
+    prUrl,
+    testsAreFailing ? "opened as a draft (tests were failing as of the last run)" : "opened a PR for review"
   );
 }
 

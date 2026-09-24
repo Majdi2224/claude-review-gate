@@ -63,6 +63,7 @@ const DEFAULT_CONFIG = {
   reviewers: [],
   labels: [],
   testResultsFile: null,
+  announceInChat: true,
 };
 
 function loadConfig(cwd) {

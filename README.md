@@ -25,7 +25,14 @@ human has to look at before it's merged.
    - commits them with a mechanically generated message,
    - pushes the branch to `origin`,
    - opens a GitHub pull request via the `gh` CLI (or updates the existing
-     one, since pushing new commits does that automatically).
+     one, since pushing new commits does that automatically),
+   - and, once there's a real PR link, forces Claude to say so clearly in
+     the chat (`announceInChat`, on by default) — not just an easy-to-miss
+     status note, an actual reply you'll see. Real testing showed a plain
+     "print a note and hope it's visible" approach wasn't reliable enough
+     on a simple, single-task turn, so this is deterministic: capped at one
+     forced reply per turn (Claude Code's own `stop_hook_active` guard),
+     never twice.
 4. A skill (`skills/review-gate/SKILL.md`) nudges Claude to (a) notice when
    new work is a genuinely separate feature from whatever PR is already
    open and ask before mixing them together, and (b) replace the mechanical
@@ -39,14 +46,16 @@ human has to look at before it's merged.
    feature on purpose, instead of continuing to add to the one that's
    already open.
 
-The commit/push/PR-open step is a deterministic script, not something the
-model decides to do — that's on purpose. Relying on the model to "remember"
-every time is exactly the kind of gap this tool exists to close. The skill
-is a quality layer on top of that guarantee, not a substitute for it — it's
-genuinely useful (it's the only part that can reason about "is this the
-same feature or a new one," which no script can judge), but it's not
-code-enforced: it depends on Claude recognizing the moment to use it, same
-as any other skill.
+The commit/push/PR-open step — and now, showing you the link — is a
+deterministic script, not something the model decides to do; that's on
+purpose. Relying on the model to "remember" every time is exactly the kind
+of gap this tool exists to close. What's still genuinely skill-dependent
+(not code-enforced) is the *judgment* call of "is this new work part of
+the PR that's already open, or does it need its own" — only the model can
+reason about that, no script can. In practice it worked correctly across
+every scenario tested (new feature → asks; related follow-up → doesn't
+ask, stays on the same PR), but it's still asking the model to notice the
+right moment, same as any skill.
 
 ## Requirements
 
@@ -76,11 +85,21 @@ defaults:
   "blockSecretFiles": true,
   "reviewers": [],
   "labels": [],
-  "testResultsFile": null
+  "testResultsFile": null,
+  "announceInChat": true
 }
 ```
 
 - `enabled: false` turns review-gate off for that project entirely.
+- `announceInChat` — on by default. Once a PR actually has a link worth
+  showing (opened or updated), review-gate forces one more Claude reply
+  that clearly states it, via Claude Code's own `{"decision": "block",
+  "reason": "..."}` hook mechanism — instead of hoping a plain status note
+  gets noticed. This is capped at exactly one forced reply per turn (Claude
+  Code's `stop_hook_active` field tells the hook it already forced a
+  continuation, so it never blocks twice — no infinite-loop risk). Set to
+  `false` if you'd rather have the old plain `[review-gate] ...` note and
+  never get the extra reply.
 - `baseBranches` — branches review-gate treats as protected. If Claude
   leaves changes sitting directly on one of these, review-gate moves them to
   a new branch instead of committing straight to it. The first entry is
