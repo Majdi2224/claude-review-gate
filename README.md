@@ -89,6 +89,13 @@ defaults:
   mechanical body. If the call fails, times out, or `claude` isn't on
   `PATH`, review-gate silently falls back to the mechanical body — it never
   blocks a PR from opening over this.
+  **Cost:** if you're logged into the `claude` CLI with a Claude Pro/Max
+  subscription (the normal case), this is free — it draws from your
+  subscription's usage allowance, same as any other Claude Code usage, not
+  a separate charge. It only costs real (small — Haiku, on a capped diff)
+  money if `ANTHROPIC_API_KEY` is set in your environment, which switches
+  Claude Code to pay-per-token API billing entirely. If you don't want any
+  chance of that, set `aiSummary: false`.
 - `blockSecretFiles` — on by default. Before committing anything, review-gate
   checks for filenames that commonly hold live credentials (`.env`,
   `id_rsa`, `*.pem`, `credentials.json`, etc.) and, separately, scans added
