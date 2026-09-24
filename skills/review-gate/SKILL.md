@@ -29,6 +29,16 @@ session — without you doing anything, it would just keep stacking
 unrelated commits onto whatever PR is already open, which defeats the
 point of one-reviewable-change-per-PR.
 
+**At the very start of a session** (your first turn, before you've made any
+edits yet), never check out or continue an old branch on your own
+initiative just because `gh pr list` or `git branch` shows one sitting
+open from earlier work — a leftover open PR is not an instruction to
+continue it. Only pick up an existing branch/PR if the person's own
+request clearly references that prior work (e.g. "keep going on the auth
+PR," "fix the bug in what I just asked for"). Otherwise, whatever branch
+review-gate/git already has you on when you start is fine to just use as
+normal — the point is not to go *looking for* old work to attach to.
+
 Before touching any files for what might be a new feature or phase (not a
 follow-up fix, typo correction, or "also handle this edge case" for what
 you just did — those belong on the PR that's already open):
