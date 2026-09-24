@@ -16,6 +16,21 @@ What the script cannot do well on its own is explain *why* something
 changed, in language a reviewer who didn't watch you work can follow. That
 part is yours. Whenever you finish a task that touched code in this repo:
 
+0. **Timing matters.** The Stop hook only runs after your turn fully ends —
+   it cannot have committed anything yet while you're still mid-response. If
+   you're following this skill in the *same* turn where you just made edits,
+   checking the PR right now would see stale data from before this edit and
+   likely confuse you into thinking something's broken or into committing by
+   hand (don't — that defeats the whole point of this tool). Instead, force
+   review-gate to run synchronously first: find the project root (nearest
+   `.git` folder), then run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/review-gate.js"` piping in
+   `{"cwd": "<project root>", "session_id": "<current session id, or \"manual\">"}`
+   as JSON on stdin (this is exactly what `/ship` does, and what the Stop
+   hook itself will do automatically once you stop — you're just doing it a
+   few seconds early). *Then* continue with step 1 below. If you're instead
+   picking this up at the start of a new turn — last turn already ended, so
+   the Stop hook has already run — skip straight to step 1.
 1. Check whether a PR exists for the current branch:
    `gh pr view --json number,url --jq '"\(.number) \(.url)"'`.
 2. If one exists, replace its auto-generated body with a short, honest
