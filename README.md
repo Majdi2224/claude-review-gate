@@ -21,7 +21,10 @@ human has to look at before it's merged.
    overhead.
 3. If there are, it:
    - makes sure the changes are on a feature branch, not `main`/`master`
-     (creating one automatically if needed),
+     (creating one automatically if needed) — and also starts a fresh one
+     if the branch it was about to reuse already had its PR merged or
+     closed, instead of silently piling new commits onto a PR nobody will
+     re-review,
    - commits them with a mechanically generated message,
    - pushes the branch to `origin`,
    - opens a GitHub pull request via the `gh` CLI (or updates the existing

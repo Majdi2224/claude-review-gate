@@ -278,6 +278,25 @@ function main() {
     }
   }
 
+  // A branch whose PR already merged or got closed is "used up" — piling
+  // more commits onto it wouldn't reopen that PR or get re-reviewed, it'd
+  // just sit there silently. Best-effort and non-fatal on purpose: if `gh`
+  // isn't installed/authed yet, this just can't know and falls through to
+  // normal behavior (the real gh checks further down still run as usual).
+  const branchPrState = run(cwd, "gh", ["pr", "view", branch, "--json", "state", "--jq", ".state"]);
+  if (branchPrState && branchPrState !== "OPEN") {
+    const base = protectedBranches[0] || "main";
+    run(cwd, "git", ["fetch", "origin", base]);
+    const freshBranch = `${config.branchPrefix || "claude/"}${timestamp()}`;
+    if (run(cwd, "git", ["checkout", "-b", freshBranch, `origin/${base}`]) === null) {
+      note(`could not start a fresh branch after "${branch}"'s PR was already ${branchPrState.toLowerCase()} — leaving changes uncommitted for you to handle.`);
+      return;
+    }
+    branch = freshBranch;
+    state[sessionId] = branch;
+    saveJson(stateFile, state);
+  }
+
   run(cwd, "git", ["add", "-A"]);
   const changedFiles =
     run(cwd, "git", ["diff", "--cached", "--name-only"]) || "";

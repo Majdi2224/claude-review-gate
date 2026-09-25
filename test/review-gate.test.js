@@ -220,7 +220,7 @@ test("gh not authenticated: pushes, does not attempt a PR", { skip: !fakeBinDir 
   assert.match(out, /isn't logged in/);
   assert.deepEqual(
     scenario.invocations().map((a) => a[1]),
-    ["--version", "auth"]
+    ["pr", "--version", "auth"]
   );
 });
 
@@ -513,4 +513,46 @@ test("updating an existing PR also forces the announcement by default", { skip: 
   const reason = parseBlock(out);
   assert.match(reason, /updated the existing PR/);
   assert.match(reason, /PR link: https:\/\/github\.com\/example\/repo\/pull\/12/);
+});
+
+test("a branch whose PR already merged: starts fresh instead of piling on", { skip: !fakeBinDir }, () => {
+  const { dir } = makeRepo();
+  git(dir, ["push", "-q", "-u", "origin", "main"]);
+  git(dir, ["checkout", "-q", "-b", "claude/old-merged-feature"]);
+
+  // Simulate review-gate already having tracked this session on the
+  // now-merged branch from an earlier turn.
+  const stateFile = path.join(dir, ".git", "review-gate", "sessions.json");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ "test-session": "claude/old-merged-feature" }));
+
+  fs.writeFileSync(path.join(dir, "README.md"), "hello\nedited\n");
+  const scenario = newCliScenario({
+    gh: {
+      "--version": { stdout: "gh version 2.0.0\n" },
+      "auth status": { code: 0 },
+      "pr view * --json state --jq .state": { stdout: "MERGED\n" },
+      "pr view * --json url --jq .url": { code: 1 },
+      "pr create **": { stdout: "https://github.com/example/repo/pull/13\n" },
+    },
+  });
+
+  const out = runReviewGate(dir, { fakeBinDir, extraEnv: scenario.env });
+
+  const reason = parseBlock(out);
+  assert.match(reason, /opened a PR for review/);
+  assert.match(reason, /PR link: https:\/\/github\.com\/example\/repo\/pull\/13/);
+
+  const newBranch = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  assert.notEqual(newBranch, "claude/old-merged-feature");
+  assert.match(newBranch, /^claude\//);
+
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state["test-session"], newBranch);
+
+  // The old, merged branch is untouched — no new commits piled onto it.
+  assert.equal(
+    git(dir, ["rev-parse", "claude/old-merged-feature"]),
+    git(dir, ["rev-parse", "main"])
+  );
 });
